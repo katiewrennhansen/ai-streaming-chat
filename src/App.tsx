@@ -75,6 +75,7 @@ export default function App() {
                     key={s}
                     size="sm"
                     variant="secondary"
+                    className="text-white"
                     onPress={() => handleSend(s)}
                   >
                     {s}
