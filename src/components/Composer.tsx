@@ -1,44 +1,50 @@
-import { Button, TextArea } from '@heroui/react';
-import { memo, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { Button, TextArea } from "@heroui/react";
+import { useState, type KeyboardEvent, type SubmitEventHandler } from "react";
 
-interface Props {
+type ComposerProps = {
   isStreaming: boolean;
   onSend: (text: string) => void;
   onStop: () => void;
-}
+};
 
-/** The input's state lives here, so typing never re-renders the message list. */
-export const Composer = memo(function Composer({ isStreaming, onSend, onStop }: Props) {
-  const [text, setText] = useState('');
+export const Composer = ({ isStreaming, onSend, onStop }: ComposerProps) => {
+  const [text, setText] = useState("");
 
-  const submit = (e?: FormEvent) => {
-    e?.preventDefault();
+  const handleSubmitText = () => {
     const trimmed = text.trim();
     if (!trimmed || isStreaming) return;
+
     onSend(trimmed);
-    setText('');
+    setText("");
   };
 
-  // Enter sends, Shift+Enter adds a new line, Esc stops a streaming reply.
-  // `isComposing` skips Enter while an IME (e.g. Japanese input) is active.
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      submit();
-    } else if (e.key === 'Escape' && isStreaming) {
-      onStop();
+      handleSubmitText();
     }
   };
 
+  const handleFormSubmit: SubmitEventHandler<HTMLFormElement> = (e) => {
+    e.preventDefault();
+    handleSubmitText();
+  };
+
+  const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setText(e.target.value);
+  };
+
   return (
-    <form className="flex items-end gap-2" onSubmit={submit}>
+    <form className="flex items-end gap-2" onSubmit={handleFormSubmit}>
       <TextArea
         aria-label="Message"
         rows={1}
         fullWidth
         value={text}
-        placeholder={isStreaming ? 'Responding… press Esc to stop' : 'Ask something…'}
-        onChange={(e) => setText(e.target.value)}
+        placeholder={
+          isStreaming ? "Responding… press Esc to stop" : "Ask something…"
+        }
+        onChange={handleTextChange}
         onKeyDown={onKeyDown}
         autoFocus
         className="max-h-40 resize-none"
@@ -54,4 +60,4 @@ export const Composer = memo(function Composer({ isStreaming, onSend, onStop }: 
       )}
     </form>
   );
-});
+};

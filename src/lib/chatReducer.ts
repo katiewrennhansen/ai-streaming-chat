@@ -1,4 +1,4 @@
-import type { AssistantMessage, Message, MessageId, UserMessage } from './types';
+import { AssistantStatuses, type AssistantMessage, type Message, type MessageId, type UserMessage } from './types';
 
 type ChatAction =
   | { type: 'send'; user: UserMessage; assistantId: MessageId }
@@ -54,7 +54,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         id: action.assistantId,
         role: 'assistant',
         replyTo: action.user.id,
-        status: 'pending',
+        status: AssistantStatuses.Pending,
         content: '',
       };
       return [...state, action.user, assistant];
@@ -62,37 +62,37 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
     case 'append':
       return updateAssistant(state, action.id, (m) =>
-        m.status === 'pending' || m.status === 'streaming'
-          ? { ...base(m), status: 'streaming', content: m.content + action.text }
+        m.status === AssistantStatuses.Pending || m.status === AssistantStatuses.Streaming
+          ? { ...base(m), status: AssistantStatuses.Streaming, content: m.content + action.text }
           : m,
       );
 
     case 'complete':
       return updateAssistant(state, action.id, (m) =>
-        m.status === 'pending' || m.status === 'streaming'
-          ? { ...base(m), status: 'complete', content: m.content }
+        m.status === AssistantStatuses.Pending || m.status === AssistantStatuses.Streaming
+          ? { ...base(m), status: AssistantStatuses.Complete, content: m.content }
           : m,
       );
 
     case 'fail':
       // Keep the partial text. Wiping it would throw away what the user was reading.
       return updateAssistant(state, action.id, (m) =>
-        m.status === 'pending' || m.status === 'streaming'
-          ? { ...base(m), status: 'error', content: m.content, error: action.error }
+        m.status === AssistantStatuses.Pending || m.status === AssistantStatuses.Streaming
+          ? { ...base(m), status: AssistantStatuses.Error, content: m.content, error: action.error }
           : m,
       );
 
     case 'stop':
       return updateAssistant(state, action.id, (m) =>
-        m.status === 'pending' || m.status === 'streaming'
-          ? { ...base(m), status: 'stopped', content: m.content }
+        m.status === AssistantStatuses.Pending || m.status === AssistantStatuses.Streaming
+          ? { ...base(m), status: AssistantStatuses.Stopped, content: m.content }
           : m,
       );
 
     case 'retry':
       return updateAssistant(state, action.id, (m) =>
-        m.status === 'error' || m.status === 'stopped'
-          ? { ...base(m), status: 'pending', content: '' }
+        m.status === AssistantStatuses.Error || m.status === AssistantStatuses.Stopped
+          ? { ...base(m), status: AssistantStatuses.Pending, content: '' }
           : m,
       );
   }

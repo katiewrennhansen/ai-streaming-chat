@@ -1,9 +1,9 @@
 // The wire format between our server and the browser. Imported by both.
 
-export interface ChatTurn {
+export type ChatHistoryItem = {
   role: 'user' | 'assistant';
   content: string;
-}
+};
 
 /** GET /api/status: whether the server is set up to talk to OpenAI. */
 export type ServerStatus = { ready: true; model: string } | { ready: false; problem: string };

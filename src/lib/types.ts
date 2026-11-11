@@ -1,16 +1,27 @@
 export type MessageId = string;
 
-export interface UserMessage {
+export type UserMessage = {
   id: MessageId;
-  role: 'user';
+  role: "user";
   content: string;
-}
+};
 
-interface AssistantBase {
+export const AssistantStatuses = {
+  Pending: "pending",
+  Streaming: "streaming",
+  Complete: "complete",
+  Stopped: "stopped",
+  Error: "error",
+} as const;
+
+export type AssistantStatus =
+  (typeof AssistantStatuses)[keyof typeof AssistantStatuses];
+
+type AssistantBase = {
   id: MessageId;
-  role: 'assistant';
+  role: "assistant";
   replyTo: MessageId;
-}
+};
 
 /**
  * Each status is its own variant, so the type system knows which fields exist
@@ -19,11 +30,22 @@ interface AssistantBase {
  * automatically, and `assertNever` makes a missing case a compile error.
  */
 export type AssistantMessage =
-  | (AssistantBase & { status: 'pending'; content: '' })
-  | (AssistantBase & { status: 'streaming'; content: string })
-  | (AssistantBase & { status: 'complete'; content: string })
-  | (AssistantBase & { status: 'stopped'; content: string })
-  | (AssistantBase & { status: 'error'; content: string; error: string });
+  | (AssistantBase & {
+      status: typeof AssistantStatuses.Pending;
+      content: "";
+    })
+  | (AssistantBase & {
+      status:
+        | typeof AssistantStatuses.Streaming
+        | typeof AssistantStatuses.Complete
+        | typeof AssistantStatuses.Stopped;
+      content: string;
+    })
+  | (AssistantBase & {
+      status: typeof AssistantStatuses.Error;
+      content: string;
+      error: string;
+    });
 
 export type Message = UserMessage | AssistantMessage;
 

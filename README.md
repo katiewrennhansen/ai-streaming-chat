@@ -9,19 +9,10 @@ TextArea, Card, Alert, Spinner) and styled with Tailwind CSS v4. Markdown
 replies use Tailwind's typography plugin (`prose`). Light and dark mode follow
 the system setting; see the small script in [index.html](index.html).
 
-API state is managed with [TanStack Query](https://tanstack.com/query):
-- Each reply request is a `useMutation` in [useChat.ts](src/hooks/useChat.ts).
-  Its lifecycle callbacks handle start, complete, stop/fail, and cleanup, and
-  `isPending` drives the Send/Stop button. Automatic retries are off, because
-  re-sending would stream the reply twice. Users retry with the Retry button.
-- The server's setup is a `useQuery` in
-  [useServerStatus.ts](src/hooks/useServerStatus.ts), against `GET
-  /api/status`. The header shows the model name, or a warning if the key or
-  model is missing or the server is down. It refetches when you return to the
-  tab.
-
-The messages themselves stay in a reducer. They are on-screen state that
-changes on every token, not cached server data.
+The header checks `GET /api/status` (see
+[useServerStatus.ts](src/hooks/useServerStatus.ts)). It shows the model name,
+or a warning if the key or model is missing or the server is down. The check
+runs again when you return to the tab.
 
 ```bash
 nvm use                # Node 22 (see .nvmrc)

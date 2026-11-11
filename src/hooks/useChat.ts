@@ -1,64 +1,38 @@
-import { useMutation } from "@tanstack/react-query";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { chatReducer } from "../lib/chatReducer";
 import { openAIStream, StreamFailure } from "../lib/openAIStream";
-import type { ChatTurn } from "../lib/protocol";
+import type { ChatHistoryItem } from "../lib/protocol";
 import { toPlainText } from "../lib/repairMarkdown";
-import type { Message, MessageId } from "../lib/types";
+import { AssistantStatuses, type Message, type MessageId } from "../lib/types";
 
-// ─── IDs ────────────────────────────────────────────────────────────────────
-// Each message needs a unique id, which React also uses as its list `key`. A
-// simple counter is enough, because ids only need to be unique within this
-// browser tab.
-let nextId = 0;
-const newId = (prefix: string) => `${prefix}-${++nextId}`;
+const newId = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
 
 // ─── Conversation history ───────────────────────────────────────────────────
 /**
  * Turn the on-screen messages into the history we send to OpenAI.
- *
  * The model needs the whole conversation on every request, because it has no
- * memory between calls. We include:
- * - every user message
- * - assistant replies the user actually saw: complete ones, and stopped ones
- *   that have some text
- *
- * Failed replies, and replies still pending or streaming, are left out, so the
- * model never sees a broken or half-written answer as part of the history.
+ * memory between calls.
  */
-function toTurns(messages: Message[]): ChatTurn[] {
-  const turns: ChatTurn[] = [];
+function buildChatHistory(messages: Message[]): ChatHistoryItem[] {
+  const history: ChatHistoryItem[] = [];
   for (const m of messages) {
-    if (m.role === "user") turns.push({ role: "user", content: m.content });
-    else if (m.status === "complete" || (m.status === "stopped" && m.content)) {
-      turns.push({ role: "assistant", content: m.content });
+    if (m.role === "user") history.push({ role: "user", content: m.content });
+    else if (
+      m.status === AssistantStatuses.Complete ||
+      (m.status === AssistantStatuses.Stopped && m.content)
+    ) {
+      history.push({ role: "assistant", content: m.content });
     }
   }
-  return turns;
-}
-
-/** Everything one reply request needs. These are the mutation's "variables". */
-interface ReplyRequest {
-  /** The assistant message the reply streams into. */
-  id: MessageId;
-  /** The conversation history to send. */
-  turns: ChatTurn[];
-  /** Cancels this request. Created per request, so Stop cancels the right one. */
-  controller: AbortController;
+  return history;
 }
 
 /**
  * All of the chat's state and actions in one hook.
  *
- * Who owns what:
- * - TanStack Query (`useMutation`) owns each reply *request*: running it,
- *   tracking whether one is in flight, and calling our lifecycle callbacks.
- * - The reducer owns the *messages* on screen: their text, and the status of
- *   each one (pending → streaming → complete / stopped / error).
- *
  * Returns:
  * - `messages`: everything shown in the conversation
- * - `isStreaming`: true while a reply request is in flight
+ * - `isStreaming`: true while a reply is pending or streaming
  * - `send(text)`: send a new user message and stream the reply
  * - `retry(id)`: regenerate a reply that failed or was stopped
  * - `stop()`: cancel the reply that is streaming
@@ -88,7 +62,7 @@ export function useChat() {
   // ─── Cancellation ───────────────────────────────────────────────────────
   // The AbortController of the request in flight, if any. Calling abort()
   // cancels the fetch to our server, and the server then cancels its request
-  // to OpenAI. TanStack mutations have no built-in cancel, so we keep our own.
+  // to OpenAI.
   const abortRef = useRef<AbortController | null>(null);
 
   // ─── Chunk batching ─────────────────────────────────────────────────────
@@ -128,109 +102,88 @@ export function useChat() {
     dispatch({ type: "append", id, text });
   }, []);
 
-  // ─── The reply request, as a TanStack mutation ──────────────────────────
-  // A mutation fits a chat message: it's a POST that runs when the user acts,
-  // rather than data we fetch and cache. TanStack calls the callbacks below
-  // in order: onMutate → mutationFn → onSuccess or onError → onSettled.
-  //
-  // The callbacks live here on useMutation (not on each mutate() call) so
-  // they run for *every* request, including one that was replaced by a newer
-  // request before it finished.
-  const reply = useMutation({
-    mutationKey: ["chat-reply"],
-    // Never retry automatically. Re-sending would stream the whole reply
-    // again on top of the partial one. Users retry with the Retry button.
-    retry: false,
-
-    // ── Before the request: point the buffer at this message ──
-    onMutate: ({ id }: ReplyRequest) => {
-      buffer.current = { id, text: "" };
-      setAnnouncement("Assistant is responding.");
-    },
-
-    // ── The request: stream the reply ──
-    // openAIStream yields text chunks as they arrive from the server. Each
-    // chunk goes into the buffer, and a frame is scheduled to commit it if
-    // one isn't already pending. `??=` only assigns when frame.current is
-    // null, so at most one frame is ever scheduled. The full text is
-    // returned, and TanStack passes it to onSuccess.
-    mutationFn: async ({ turns, controller }: ReplyRequest) => {
-      let full = "";
-      for await (const chunk of openAIStream(turns, controller.signal)) {
-        full += chunk;
-        buffer.current.text += chunk;
-        frame.current ??= requestAnimationFrame(flush);
-      }
-      return full;
-    },
-
-    // ── Success: the stream ended with a proper "done" event ──
-    // Commit the last buffered text, then mark the message complete.
-    onSuccess: (full, { id }) => {
-      flush();
-      dispatch({ type: "complete", id });
-      setAnnouncement(`Assistant replied: ${toPlainText(full)}`);
-    },
-
-    // ── Stopped or failed ──
-    // Either way, commit what arrived first. The partial reply stays on
-    // screen instead of disappearing.
-    onError: (err, { id, controller }) => {
-      flush();
-
-      if (controller.signal.aborted) {
-        // The user pressed Stop (or the component unmounted). Aborting makes
-        // the stream throw, but this isn't an error.
-        dispatch({ type: "stop", id });
-        setAnnouncement("Response stopped. The partial reply is kept.");
-        return;
-      }
-
-      // A real failure. StreamFailure messages are written for users ("The
-      // connection dropped mid-reply."), so they are shown as they are.
-      // Anything else is a bug, so it is logged and a generic message is
-      // shown.
-      const message =
-        err instanceof StreamFailure ? err.message : "Something went wrong.";
-      if (!(err instanceof StreamFailure)) console.error(err);
-      dispatch({ type: "fail", id, error: message });
-      setAnnouncement(
-        "The response failed. Any partial reply is kept, and you can retry.",
-      );
-    },
-
-    // ── Cleanup, after success or error ──
-    // Clear the "current request" refs, but only if they still belong to
-    // this request. If a newer request has already started, these refs are
-    // its own, and clearing them would break it.
-    onSettled: (_data, _err, { controller }) => {
-      if (abortRef.current === controller) {
-        abortRef.current = null;
-        buffer.current.id = null;
-      }
-    },
-  });
-
-  // `mutate` keeps the same identity for the hook's lifetime, so send/retry
-  // (and the composer's props) stay stable while a reply streams.
-  const { mutate } = reply;
-
   /**
-   * Start a reply request for assistant message `id`.
+   * Stream one reply into the assistant message `id`.
    *
-   * Normally only one reply streams at a time (the UI blocks sending while
-   * streaming). As a safeguard, any buffered text is committed and a previous
-   * request is cancelled before the new one starts.
+   * send() and retry() both use this. It sets up cancellation, consumes the
+   * stream, and moves the message to its final status: complete, stopped,
+   * or error.
    */
   const startReply = useCallback(
-    (id: MessageId, turns: ChatTurn[]) => {
+    async (id: MessageId, history: ChatHistoryItem[]) => {
+      // ── Setup ──
+      // Normally only one reply streams at a time (the UI blocks sending
+      // while streaming). As a safeguard, commit any leftover text and cancel
+      // a previous request before starting a new one.
       flush();
       abortRef.current?.abort();
+
+      // A fresh controller for this reply, so stop() knows what to cancel.
       const controller = new AbortController();
       abortRef.current = controller;
-      mutate({ id, turns, controller });
+
+      // Point the buffer at this message, starting empty.
+      buffer.current = { id, text: "" };
+      setAnnouncement("Assistant is responding.");
+
+      // The full reply text, kept for the screen-reader announcement at the
+      // end. State updates are batched, so we keep our own copy here.
+      let full = "";
+
+      try {
+        // ── Streaming ──
+        // openAIStream yields text chunks as they arrive from the server.
+        // Each chunk goes into the buffer, and a frame is scheduled to commit
+        // it if one isn't already pending. `??=` only assigns when
+        // frame.current is null, so at most one frame is ever scheduled.
+        for await (const chunk of openAIStream(history, controller.signal)) {
+          full += chunk;
+          buffer.current.text += chunk;
+          frame.current ??= requestAnimationFrame(flush);
+        }
+
+        // ── Success ──
+        // The stream ended with a proper "done" event. Commit the last
+        // buffered text, then mark the message complete.
+        flush();
+        dispatch({ type: "complete", id });
+        setAnnouncement(`Assistant replied: ${toPlainText(full)}`);
+      } catch (err) {
+        // ── Stopped or failed ──
+        // Either way, commit what arrived first. The partial reply stays on
+        // screen instead of disappearing.
+        flush();
+
+        if (controller.signal.aborted) {
+          // The user pressed Stop (or the component unmounted). Aborting
+          // makes the stream throw, but this isn't an error.
+          dispatch({ type: "stop", id });
+          setAnnouncement("Response stopped. The partial reply is kept.");
+        } else {
+          // A real failure. StreamFailure messages are written for users
+          // ("The connection dropped mid-reply."), so they are shown as they
+          // are. Anything else is a bug, so it is logged and a generic
+          // message is shown.
+          const message =
+            err instanceof StreamFailure ? err.message : "Something went wrong.";
+          if (!(err instanceof StreamFailure)) console.error(err);
+          dispatch({ type: "fail", id, error: message });
+          setAnnouncement(
+            "The response failed. Any partial reply is kept, and you can retry.",
+          );
+        }
+      } finally {
+        // ── Cleanup ──
+        // Clear the "current request" refs, but only if they still belong to
+        // this request. If a newer request has already started, these refs
+        // are its own, and clearing them would break it.
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+          buffer.current.id = null;
+        }
+      }
     },
-    [flush, mutate],
+    [flush],
   );
 
   // ─── Public actions ─────────────────────────────────────────────────────
@@ -247,12 +200,12 @@ export function useChat() {
     (content: string) => {
       const user = { id: newId("user"), role: "user" as const, content };
       const assistantId = newId("assistant");
-      const turns = [
-        ...toTurns(messagesRef.current),
+      const history = [
+        ...buildChatHistory(messagesRef.current),
         { role: "user" as const, content },
       ];
       dispatch({ type: "send", user, assistantId });
-      startReply(assistantId, turns);
+      void startReply(assistantId, history); // Fire and forget: it handles its own errors.
     },
     [startReply],
   );
@@ -271,14 +224,14 @@ export function useChat() {
       const index = all.findIndex((m) => m.id === id);
       if (index === -1) return; // Unknown id: nothing to retry.
       dispatch({ type: "retry", id });
-      startReply(id, toTurns(all.slice(0, index)));
+      void startReply(id, buildChatHistory(all.slice(0, index)));
     },
     [startReply],
   );
 
   /**
-   * Cancel the reply that is streaming. The stream throws, onError sees the
-   * abort, and the message is marked `stopped` with its partial text kept.
+   * Cancel the reply that is streaming. The stream throws, startReply sees
+   * the abort, and the message is marked `stopped` with its partial text kept.
    * Does nothing if no reply is streaming.
    */
   const stop = useCallback(() => abortRef.current?.abort(), []);
@@ -288,9 +241,19 @@ export function useChat() {
   // doesn't keep paying for tokens from OpenAI.
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  // ─── Derived state ──────────────────────────────────────────────────────
+  // Read from the messages rather than stored separately, so it can never
+  // disagree with what's on screen.
+  const isStreaming = messages.some(
+    (m) =>
+      m.role === "assistant" &&
+      (m.status === AssistantStatuses.Pending ||
+        m.status === AssistantStatuses.Streaming),
+  );
+
   return {
     messages,
-    isStreaming: reply.isPending,
+    isStreaming,
     send,
     retry,
     stop,

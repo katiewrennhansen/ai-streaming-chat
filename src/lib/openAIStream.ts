@@ -1,4 +1,4 @@
-import type { ChatTurn, StreamEvent } from "./protocol";
+import type { ChatHistoryItem, StreamEvent } from "./protocol";
 
 /** A failure we can explain to the user. Its message is shown in the chat. */
 export class StreamFailure extends Error {
@@ -9,12 +9,12 @@ export class StreamFailure extends Error {
  * Stream a reply from our server (which talks to OpenAI), as an async
  * generator of text chunks.
  *
- * - Abort: rejects with the AbortError, and useChat turns that into `stopped`.
+ * - Abort: rejects with the AbortError, and useChat history that into `stopped`.
  * - Any failure, including the connection closing before a `done` event,
  *   throws StreamFailure, which becomes `error` with the partial text kept.
  */
 export async function* openAIStream(
-  turns: ChatTurn[],
+  history: ChatHistoryItem[],
   signal: AbortSignal,
 ): AsyncGenerator<string, void, undefined> {
   let res: Response;
@@ -22,7 +22,7 @@ export async function* openAIStream(
     res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: turns }),
+      body: JSON.stringify({ messages: history }),
       signal,
     });
   } catch (err) {

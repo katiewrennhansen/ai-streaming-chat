@@ -83,8 +83,8 @@ export default function App() {
               </div>
             </li>
           )}
-          {chat.messages.map((m, i) => (
-            <MessageItem key={i} message={m} onRetry={chat.retry} />
+          {chat.messages.map((m) => (
+            <MessageItem key={m.id} message={m} onRetry={chat.retry} />
           ))}
         </ol>
       </div>

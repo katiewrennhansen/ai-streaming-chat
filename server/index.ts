@@ -5,15 +5,15 @@
 
 import express from 'express';
 import OpenAI, { APIUserAbortError } from 'openai';
-import type { ChatTurn, ServerStatus, StreamEvent } from '../src/lib/protocol.ts';
+import type { ChatHistoryItem, ServerStatus, StreamEvent } from '../src/lib/protocol.ts';
 
 const PORT = Number(process.env.API_PORT ?? 8787);
 const MODEL = process.env.OPENAI_MODEL;
 const INSTRUCTIONS =
   'You are a helpful assistant in a chat UI. Format answers in Markdown when it helps readability.';
 
-const MAX_TURNS = 100;
-const MAX_CHARS_PER_TURN = 20_000;
+const MAX_HISTORY_ITEMS = 100;
+const MAX_CHARS_PER_ITEM = 20_000;
 
 // The client is created lazily, so a missing key shows up as a clear error
 // in the chat instead of a crash at startup.
@@ -29,22 +29,22 @@ function configError(): string | null {
   return null;
 }
 
-function parseTurns(body: unknown): ChatTurn[] | null {
+function parseHistory(body: unknown): ChatHistoryItem[] | null {
   const messages = (body as { messages?: unknown } | null)?.messages;
-  if (!Array.isArray(messages) || messages.length === 0 || messages.length > MAX_TURNS) return null;
-  const turns: ChatTurn[] = [];
+  if (!Array.isArray(messages) || messages.length === 0 || messages.length > MAX_HISTORY_ITEMS) return null;
+  const history: ChatHistoryItem[] = [];
   for (const m of messages) {
     if (
       !m ||
       (m.role !== 'user' && m.role !== 'assistant') ||
       typeof m.content !== 'string' ||
-      m.content.length > MAX_CHARS_PER_TURN
+      m.content.length > MAX_CHARS_PER_ITEM
     ) {
       return null;
     }
-    turns.push({ role: m.role, content: m.content });
+    history.push({ role: m.role, content: m.content });
   }
-  return turns;
+  return history;
 }
 
 const app = express();
@@ -64,8 +64,8 @@ app.post('/api/chat', async (req, res) => {
     res.status(500).json({ error: problem });
     return;
   }
-  const turns = parseTurns(req.body);
-  if (!turns) {
+  const history = parseHistory(req.body);
+  if (!history) {
     res.status(400).json({ error: 'Invalid request: expected { messages: [{ role, content }] }.' });
     return;
   }
@@ -79,7 +79,7 @@ app.post('/api/chat', async (req, res) => {
 
   try {
     const stream = await getClient().responses.create(
-      { model: MODEL!, instructions: INSTRUCTIONS, input: turns, stream: true },
+      { model: MODEL!, instructions: INSTRUCTIONS, input: history, stream: true },
       { signal: upstream.signal },
     );
 

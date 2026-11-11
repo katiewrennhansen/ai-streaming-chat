@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { chatReducer, type ChatState } from './chatReducer';
 import { openAIStream, StreamFailure } from './openAIStream';
 import { repairMarkdown } from './repairMarkdown';
+import { AssistantStatuses } from './types';
 
 /** A fake server response: NDJSON split into awkward network chunks. */
 function mockFetch(body: string, init: { status?: number; chunkSize?: number } = {}) {
@@ -17,7 +18,7 @@ function mockFetch(body: string, init: { status?: number; chunkSize?: number } =
 }
 
 const ndjson = (...events: object[]) => events.map((e) => JSON.stringify(e) + '\n').join('');
-const turns = [{ role: 'user' as const, content: 'hi' }];
+const history = [{ role: 'user' as const, content: 'hi' }];
 
 async function collect(stream: AsyncGenerator<string>) {
   const chunks: string[] = [];
@@ -34,14 +35,14 @@ describe('openAIStream', () => {
 
   it('yields deltas, even when lines are split across network chunks', async () => {
     mockFetch(ndjson({ type: 'delta', text: 'Hello ' }, { type: 'delta', text: '**world**' }, { type: 'done' }));
-    const { chunks, error } = await collect(openAIStream(turns, new AbortController().signal));
+    const { chunks, error } = await collect(openAIStream(history, new AbortController().signal));
     expect(error).toBeNull();
     expect(chunks.join('')).toBe('Hello **world**');
   });
 
   it('keeps partial text and fails on an error event', async () => {
     mockFetch(ndjson({ type: 'delta', text: 'Part' }, { type: 'error', message: 'Rate limited' }));
-    const { chunks, error } = await collect(openAIStream(turns, new AbortController().signal));
+    const { chunks, error } = await collect(openAIStream(history, new AbortController().signal));
     expect(chunks).toEqual(['Part']);
     expect(error).toBeInstanceOf(StreamFailure);
     expect((error as Error).message).toBe('Rate limited');
@@ -49,13 +50,13 @@ describe('openAIStream', () => {
 
   it('treats a stream that ends without "done" as a failure', async () => {
     mockFetch(ndjson({ type: 'delta', text: 'Cut o' }));
-    const { error } = await collect(openAIStream(turns, new AbortController().signal));
+    const { error } = await collect(openAIStream(history, new AbortController().signal));
     expect((error as Error).message).toMatch(/closed before the reply finished/);
   });
 
   it('shows the server error message for a failed request', async () => {
     mockFetch(JSON.stringify({ error: 'OPENAI_API_KEY is not set.' }), { status: 500 });
-    const { error } = await collect(openAIStream(turns, new AbortController().signal));
+    const { error } = await collect(openAIStream(history, new AbortController().signal));
     expect((error as Error).message).toBe('OPENAI_API_KEY is not set.');
   });
 });
@@ -66,18 +67,18 @@ describe('chatReducer', () => {
   const assistant = (s: ChatState) => s[1];
 
   it('goes pending → streaming → complete', () => {
-    expect(assistant(start)).toMatchObject({ status: 'pending', content: '' });
+    expect(assistant(start)).toMatchObject({ status: AssistantStatuses.Pending, content: '' });
     const s1 = chatReducer(start, { type: 'append', id: 'a1', text: 'Hel' });
     const s2 = chatReducer(s1, { type: 'append', id: 'a1', text: 'lo' });
-    expect(assistant(s2)).toMatchObject({ status: 'streaming', content: 'Hello' });
-    expect(assistant(chatReducer(s2, { type: 'complete', id: 'a1' }))).toMatchObject({ status: 'complete' });
+    expect(assistant(s2)).toMatchObject({ status: AssistantStatuses.Streaming, content: 'Hello' });
+    expect(assistant(chatReducer(s2, { type: 'complete', id: 'a1' }))).toMatchObject({ status: AssistantStatuses.Complete });
   });
 
   it('keeps partial text on error, and retry resets to pending', () => {
     const s1 = chatReducer(start, { type: 'append', id: 'a1', text: 'partial' });
     const failed = chatReducer(s1, { type: 'fail', id: 'a1', error: 'boom' });
-    expect(assistant(failed)).toMatchObject({ status: 'error', content: 'partial', error: 'boom' });
-    expect(assistant(chatReducer(failed, { type: 'retry', id: 'a1' }))).toMatchObject({ status: 'pending', content: '' });
+    expect(assistant(failed)).toMatchObject({ status: AssistantStatuses.Error, content: 'partial', error: 'boom' });
+    expect(assistant(chatReducer(failed, { type: 'retry', id: 'a1' }))).toMatchObject({ status: AssistantStatuses.Pending, content: '' });
   });
 
   it('ignores chunks that arrive after stop', () => {
