@@ -85,7 +85,7 @@ export default function App() {
             </li>
           )}
           {chat.messages.map((m) => (
-            <MessageItem key={m.id} message={m} onRetry={chat.retry} />
+            <MessageItem key={m.id} message={m} />
           ))}
         </ol>
       </div>
@@ -106,17 +106,6 @@ export default function App() {
           onSend={handleSend}
           onStop={chat.stop}
         />
-      </div>
-
-      {/* The only live region. The transcript itself is not live, otherwise a
-          screen reader would try to read every token as it arrives. */}
-      <div
-        className="sr-only"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        {chat.announcement}
       </div>
     </div>
   );

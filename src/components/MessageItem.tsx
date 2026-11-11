@@ -1,28 +1,12 @@
-import { Card, CardContent, Spinner } from "@heroui/react";
-import clsx from "clsx";
-import { memo } from "react";
+import { Card, CardContent } from "@heroui/react";
 import ReactMarkdown from "react-markdown";
-import { repairMarkdown } from "../lib/repairMarkdown";
-import { AssistantStatuses, type Message, type MessageId } from "../lib/types";
-import { StatusFooter } from "./StatusFooter";
+import type { Message } from "../lib/types";
 
 type MessageItemProps = {
   message: Message;
-  onRetry: (id: MessageId) => void;
 };
 
-// A blinking block caret after the last element of a streaming reply.
-const STREAMING_CARET =
-  "[&>:last-child]:after:ml-0.5 [&>:last-child]:after:inline-block [&>:last-child]:after:h-[1em] [&>:last-child]:after:w-[0.5em] [&>:last-child]:after:bg-accent [&>:last-child]:after:align-text-bottom [&>:last-child]:after:content-[''] [&>:last-child]:after:animate-pulse motion-reduce:[&>:last-child]:after:animate-none";
-
-/**
- * Memoized. The reducer only creates a new object for the message that
- * changed, so finished messages skip rendering while another one streams.
- */
-export const MessageItem = memo(function MessageItem({
-  message,
-  onRetry,
-}: MessageItemProps) {
+export function MessageItem({ message }: MessageItemProps) {
   if (message.role === "user") {
     return (
       <li className="flex justify-end">
@@ -34,42 +18,21 @@ export const MessageItem = memo(function MessageItem({
     );
   }
 
-  const live =
-    message.status === AssistantStatuses.Pending ||
-    message.status === AssistantStatuses.Streaming;
-  const faded =
-    message.status === AssistantStatuses.Stopped ||
-    message.status === AssistantStatuses.Error;
-
-  const assistantResponse =
-    message.status === AssistantStatuses.Streaming
-      ? repairMarkdown(message.content)
-      : message.content;
-
+  // TODO: show loading, stopped and error states, and a retry button.
+  // `repairMarkdown` in ../lib/repairMarkdown.ts can tidy half-finished
+  // markdown while a reply streams.
   return (
-    <li aria-busy={live}>
+    <li>
       <span className="sr-only">Assistant:</span>
       <Card>
         <CardContent>
-          {message.status === AssistantStatuses.Pending ? (
-            <Spinner size="sm" aria-label="Assistant is thinking" />
-          ) : (
-            <div
-              className={clsx(
-                // `prose` styles the markdown. The code: overrides drop the
-                // literal backticks it adds around inline code.
-                "prose prose-sm max-w-none dark:prose-invert prose-code:before:content-none prose-code:after:content-none",
-                message.status === AssistantStatuses.Streaming &&
-                  STREAMING_CARET,
-                faded && "opacity-85",
-              )}
-            >
-              <ReactMarkdown>{assistantResponse}</ReactMarkdown>
-            </div>
-          )}
-          <StatusFooter message={message} onRetry={onRetry} />
+          {/* `prose` styles the markdown. The code: overrides drop the
+              literal backticks it adds around inline code. */}
+          <div className="prose prose-sm max-w-none dark:prose-invert prose-code:before:content-none prose-code:after:content-none">
+            <ReactMarkdown>{message.content}</ReactMarkdown>
+          </div>
         </CardContent>
       </Card>
     </li>
   );
-});
+}

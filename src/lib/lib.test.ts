@@ -1,8 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { chatReducer, type ChatState } from './chatReducer';
 import { openAIStream, StreamFailure } from './openAIStream';
 import { repairMarkdown } from './repairMarkdown';
-import { AssistantStatuses } from './types';
 
 /** A fake server response: NDJSON split into awkward network chunks. */
 function mockFetch(body: string, init: { status?: number; chunkSize?: number } = {}) {
@@ -58,38 +56,6 @@ describe('openAIStream', () => {
     mockFetch(JSON.stringify({ error: 'OPENAI_API_KEY is not set.' }), { status: 500 });
     const { error } = await collect(openAIStream(history, new AbortController().signal));
     expect((error as Error).message).toBe('OPENAI_API_KEY is not set.');
-  });
-});
-
-describe('chatReducer', () => {
-  const user = { id: 'u1', role: 'user' as const, content: 'hi' };
-  const start = chatReducer([], { type: 'send', user, assistantId: 'a1' });
-  const assistant = (s: ChatState) => s[1];
-
-  it('goes pending → streaming → complete', () => {
-    expect(assistant(start)).toMatchObject({ status: AssistantStatuses.Pending, content: '' });
-    const s1 = chatReducer(start, { type: 'append', id: 'a1', text: 'Hel' });
-    const s2 = chatReducer(s1, { type: 'append', id: 'a1', text: 'lo' });
-    expect(assistant(s2)).toMatchObject({ status: AssistantStatuses.Streaming, content: 'Hello' });
-    expect(assistant(chatReducer(s2, { type: 'complete', id: 'a1' }))).toMatchObject({ status: AssistantStatuses.Complete });
-  });
-
-  it('keeps partial text on error, and retry resets to pending', () => {
-    const s1 = chatReducer(start, { type: 'append', id: 'a1', text: 'partial' });
-    const failed = chatReducer(s1, { type: 'fail', id: 'a1', error: 'boom' });
-    expect(assistant(failed)).toMatchObject({ status: AssistantStatuses.Error, content: 'partial', error: 'boom' });
-    expect(assistant(chatReducer(failed, { type: 'retry', id: 'a1' }))).toMatchObject({ status: AssistantStatuses.Pending, content: '' });
-  });
-
-  it('ignores chunks that arrive after stop', () => {
-    const s1 = chatReducer(start, { type: 'append', id: 'a1', text: 'abc' });
-    const stopped = chatReducer(s1, { type: 'stop', id: 'a1' });
-    expect(chatReducer(stopped, { type: 'append', id: 'a1', text: 'late' })).toBe(stopped);
-  });
-
-  it('keeps the identity of untouched messages (so memo works)', () => {
-    const s1 = chatReducer(start, { type: 'append', id: 'a1', text: 'abc' });
-    expect(s1[0]).toBe(start[0]);
   });
 });
 
