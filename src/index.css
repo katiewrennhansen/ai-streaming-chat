@@ -1,0 +1,11 @@
+/* Order matters: Tailwind first, then HeroUI's theme and component styles. */
+@import 'tailwindcss';
+@import '@heroui/styles';
+
+/* Styles the markdown in assistant replies (the `prose` classes). */
+@plugin '@tailwindcss/typography';
+
+/* Browser scroll anchoring would fight useStickToBottom's follow logic. */
+@utility overflow-anchor-none {
+  overflow-anchor: none;
+}

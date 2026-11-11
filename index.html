@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="data:," />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chat</title>
+    <script>
+      // HeroUI's theme colors apply under a `light` or `dark` class on <html>.
+      // Follow the system setting, and update if it changes. This runs before
+      // the page renders, so there's no flash of the wrong theme.
+      (() => {
+        const query = matchMedia('(prefers-color-scheme: dark)');
+        const apply = () => {
+          document.documentElement.classList.toggle('dark', query.matches);
+          document.documentElement.classList.toggle('light', !query.matches);
+        };
+        apply();
+        query.addEventListener('change', apply);
+      })();
+    </script>
+  </head>
+  <body class="bg-background text-foreground antialiased">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
