@@ -85,7 +85,7 @@ export default function App() {
             </li>
           )}
           {chat.messages.map((m) => (
-            <MessageItem key={m.id} message={m} />
+            <MessageItem key={m.id} message={m} chat={chat} />
           ))}
         </ol>
       </div>

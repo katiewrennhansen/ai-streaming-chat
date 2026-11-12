@@ -7,4 +7,5 @@ export type Message = {
   id: MessageId;
   role: "user" | "assistant";
   content: string;
+  status?: "streaming" | "complete" | "stopped" | "error";
 };
